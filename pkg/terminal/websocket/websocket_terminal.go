@@ -1,8 +1,9 @@
-package wsterminal
+package websocket
 
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"time"
@@ -10,7 +11,7 @@ import (
 	"github.com/gorilla/websocket"
 	"k8s.io/client-go/tools/remotecommand"
 
-	"github.com/maoqide/kubeutil/webshell"
+	"github.com/maoqide/kubeutil/pkg/terminal"
 )
 
 var upgrader = func() websocket.Upgrader {
@@ -27,12 +28,14 @@ type TerminalSession struct {
 	wsConn   *websocket.Conn
 	sizeChan chan remotecommand.TerminalSize
 	doneChan chan struct{}
+	tty      bool
 }
 
 // NewTerminalSessionWs create TerminalSession
 func NewTerminalSessionWs(conn *websocket.Conn) *TerminalSession {
 	return &TerminalSession{
 		wsConn:   conn,
+		tty:      true,
 		sizeChan: make(chan remotecommand.TerminalSize),
 		doneChan: make(chan struct{}),
 	}
@@ -46,6 +49,7 @@ func NewTerminalSession(w http.ResponseWriter, r *http.Request, responseHeader h
 	}
 	session := &TerminalSession{
 		wsConn:   conn,
+		tty:      true,
 		sizeChan: make(chan remotecommand.TerminalSize),
 		doneChan: make(chan struct{}),
 	}
@@ -67,18 +71,33 @@ func (t *TerminalSession) Next() *remotecommand.TerminalSize {
 	}
 }
 
+// Stdin ...
+func (t *TerminalSession) Stdin() io.Reader {
+	return t
+}
+
+// Stdout ...
+func (t *TerminalSession) Stdout() io.Writer {
+	return t
+}
+
+// Stderr ...
+func (t *TerminalSession) Stderr() io.Writer {
+	return t
+}
+
 // Read called in a loop from remotecommand as long as the process is running
 func (t *TerminalSession) Read(p []byte) (int, error) {
 	_, message, err := t.wsConn.ReadMessage()
 	if err != nil {
 		log.Printf("read message err: %v", err)
-		return copy(p, webshell.EndOfTransmission), err
+		return copy(p, terminal.EndOfTransmission), err
 	}
-	var msg webshell.TerminalMessage
+	var msg terminal.TerminalMessage
 	if err := json.Unmarshal([]byte(message), &msg); err != nil {
 		log.Printf("read parse message err: %v", err)
 		// return 0, nil
-		return copy(p, webshell.EndOfTransmission), err
+		return copy(p, terminal.EndOfTransmission), err
 	}
 	switch msg.Operation {
 	case "stdin":
@@ -91,13 +110,13 @@ func (t *TerminalSession) Read(p []byte) (int, error) {
 	default:
 		log.Printf("unknown message type '%s'", msg.Operation)
 		// return 0, nil
-		return copy(p, webshell.EndOfTransmission), fmt.Errorf("unknown message type '%s'", msg.Operation)
+		return copy(p, terminal.EndOfTransmission), fmt.Errorf("unknown message type '%s'", msg.Operation)
 	}
 }
 
 // Write called from remotecommand whenever there is any output
 func (t *TerminalSession) Write(p []byte) (int, error) {
-	msg, err := json.Marshal(webshell.TerminalMessage{
+	msg, err := json.Marshal(terminal.TerminalMessage{
 		Operation: "stdout",
 		Data:      string(p),
 	})
@@ -110,6 +129,11 @@ func (t *TerminalSession) Write(p []byte) (int, error) {
 		return 0, err
 	}
 	return len(p), nil
+}
+
+// Tty ...
+func (t *TerminalSession) Tty() bool {
+	return t.tty
 }
 
 // Close close session

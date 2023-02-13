@@ -14,8 +14,8 @@ import (
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
 
+	terminal "github.com/maoqide/kubeutil/pkg/terminal"
 	"github.com/maoqide/kubeutil/utils"
-	"github.com/maoqide/kubeutil/webshell"
 )
 
 // PodBox provide functions for kubernetes pod.
@@ -79,7 +79,7 @@ func (b *PodBox) WatchPod(namespace, podName string, timeoutSeconds *int64) (wat
 }
 
 // Exec exec into a pod
-func (b *PodBox) Exec(cmd []string, ptyHandler webshell.PtyHandler, namespace, podName, containerName string) error {
+func (b *PodBox) Exec(cmd []string, ptyHandler terminal.PtyHandler, namespace, podName, containerName string) error {
 	defer func() {
 		ptyHandler.Done()
 	}()
@@ -93,10 +93,10 @@ func (b *PodBox) Exec(cmd []string, ptyHandler webshell.PtyHandler, namespace, p
 	req.VersionedParams(&corev1.PodExecOptions{
 		Container: containerName,
 		Command:   cmd,
-		Stdin:     true,
-		Stdout:    true,
-		Stderr:    true,
-		TTY:       true,
+		Stdin:     !(ptyHandler.Stdin() == nil),
+		Stdout:    !(ptyHandler.Stdout() == nil),
+		Stderr:    !(ptyHandler.Stderr() == nil),
+		TTY:       ptyHandler.Tty(),
 	}, scheme.ParameterCodec)
 
 	executor, err := remotecommand.NewSPDYExecutor(b.config, "POST", req.URL())
@@ -104,11 +104,11 @@ func (b *PodBox) Exec(cmd []string, ptyHandler webshell.PtyHandler, namespace, p
 		return err
 	}
 	err = executor.Stream(remotecommand.StreamOptions{
-		Stdin:             ptyHandler,
-		Stdout:            ptyHandler,
-		Stderr:            ptyHandler,
+		Stdin:             ptyHandler.Stdin(),
+		Stdout:            ptyHandler.Stdout(),
+		Stderr:            ptyHandler.Stderr(),
 		TerminalSizeQueue: ptyHandler,
-		Tty:               true,
+		Tty:               ptyHandler.Tty(),
 	})
 	return err
 }
